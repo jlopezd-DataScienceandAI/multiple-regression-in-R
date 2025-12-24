@@ -1,0 +1,544 @@
+---
+title: "Regresión Múltiple"
+author: "Jorge López Díaz"
+date: "2025-11-18"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+# Descripción y objetivos
+
+Se dispone de información (Belsley, Kuh y Welsch,1980) sobre promedios de 1960-1970 (para 
+eliminar el ciclo económico u otras fluctuaciones a corto plazo) de 50 países sobre las siguientes 
+variables:  
+• dpi es la renta disponible per cápita en dólares;  
+• ddpi es la tasa de variación porcentual de la renta disponible per cápita;  
+• sr es el ahorro personal agregado dividido por la renta disponible.  
+• pop15 es el porcentaje de población menor de 15 años.  
+• pop75 es el porcentaje de población mayor de 75 años. 
+La información está disponible en el conjunto de datos savings del paquete faraway. 
+Se solicita utilizar la información anterior para construir un modelo de regresión lineal que 
+permita predecir la capacidad de ahorra personal de la población (variable respuesta sr) basandose en un análisis estadístico exhaustivo.
+
+## FASE I
+#### Importar y preparar las variables. 
+
+```{r, message=FALSE, warning=FALSE}
+if (!require(faraway )) install.packages("faraway")
+if (!require(ggplot2 )) install.packages("ggplot2")
+if (!require(car )) install.packages("car")
+if (!require(corrplot )) install.packages("corrplot")
+if (!require(MASS )) install.packages("MASS")
+```
+
+Se carga la librería que almacena los datos.
+```{r}
+library(faraway)
+```
+
+Carga de datos y preparación de variables.
+```{r}
+sv <- data.frame(savings[,1:3], dpi=(savings[,4])/1000, ddpi=savings[,5])
+nrow(sv)
+names <- rownames(sv) 
+```
+
+Descripción de variables.
+```{r}
+summary(sv)
+```
+Los datos de ingresos (dpi) y su tasa de crecimiento (ddpi) presentan una marcada asimetría positiva, mientras que las otras variables muestran distribuciones más centrales.
+
+```{r}
+View(sv)
+```
+
+No existen valores ausentes.
+
+## FASE II  
+#### Análisis descriptivo de las variables, estudio de valores ausentes o atípicos y estudio de la correlación.   
+
+*Histogramas*
+```{r, fig.width=12, fig.height=12}
+par(mfrow = c(2,3),
+    mar = c(4,4,3,1),  
+    cex = 1.2)
+for(i in 1:5) hist(sv[,i],main=names(sv)[i])
+```
+sr: Distribución con sesgo a la derecha. La mayoría de países tienen valores entre 5 y 15, con pocos casos más altos.  
+
+pop15: Parece relativamente simétrica, quizá con dos agrupaciones ligeras ya que la mayoría de datos están en los extremos de la gráfica.  
+
+pop75: Distribución más dispersa. También con ligera cola derecha.
+
+dpi: Muy sesgada a la derecha. La mayoría de valores son bajos, con algunos países muy por encima del resto (outliers).  
+
+ddpi: También sesgada a la derecha, aunque menos extrema que dpi. La mayor parte de valores están entre 0 y 5, con algunos casos altos en torno a más de 15 (outliers).  
+
+*Boxplots*
+```{r, fig.width=12, fig.height=12}
+par(mfrow = c(2,3),
+    mar = c(4,4,3,1),  
+    cex = 1.2)
+for(i in 1:5) boxplot(sv[,i],main=names(sv)[i])
+```
+sr: Distribución moderadamente simétrica, sin valores atípicos extremos. La mediana está cerca del centro del rango intercuartílico (IQR), con variabilidad moderada.  
+
+pop15: Mayor dispersión. La mediana está algo más cerca del cuartil inferior, indicando ligera asimetría hacia arriba. No se observan outliers.  
+
+pop75: IQR relativamente estrecho y sin outliers. Los valores están bastante concentrados, con ligera asimetría hacia arriba (la cola superior más larga).  
+
+dpi: Fuertemente asimétrico. Gran distancia entre la mediana y el límite superior, lo que indica países con valores muy altos. No se muestran outliers explícitos, pero claramente hay una cola larga para valores más altos.  
+
+ddpi: Variabilidad baja en general, pero con algunos outliers claros por encima de 10–15. La mediana está baja en el IQR, lo que indica sesgo a la derecha.  
+
+
+```{r}
+pairs(sv)
+```
+Destacar las relaciones lineales inversas entre pop15 y pop75. Tiene cierto sentido ya que cuanto mayor es la tasa de población joven suele haber menos población mayor. Esta relación se ve claramente entre países desarrollados y no desarrollados.
+
+
+#### Covarianza y correlación
+```{r}
+#RELACIÓN LINEAL DE LAS VARIABLES
+cov(sv)
+cor(sv)
+```
+La variable sr presenta una correlación negativa moderada con pop15, lo que indica que una mayor proporción de población joven se asocia con menores tasas de ahorro. También muestra correlaciones positivas moderadas con ddpi y pop75, sugiriendo que tanto el crecimiento de la renta disponible como un mayor envejecimiento de la población tienden a relacionarse con mayores niveles de ahorro. La relación con dpi es positiva pero débil.
+
+Entre las variables explicativas destaca una fuerte correlación negativa entre pop15 y pop75, lo que refleja que los países con muchos jóvenes suelen tener pocos mayores y viceversa. Además, pop15 y dpi presentan correlación negativa elevada, mientras que pop75 y dpi muestran correlación positiva alta, lo que indica posible multicolinealidad entre las variables demográficas y el nivel de renta. Por su parte, ddpi tiene correlaciones muy bajas con el resto, por lo que actúa como predictor prácticamente independiente.
+
+
+- Gráfica de correlación  
+
+```{r}
+#Vemos la correlación gráficamente
+par(mfrow=c(1,1))
+library('corrplot')
+corrplot(cor(sv),method="circle") 
+```
+Con esta gráfica se refuerza lo ya dicho anteriormente:    
+
+- pop15 y pop75 están fuertemente correlacionados negativamente, lo que tiene sentido porque representan proporciones de población joven y mayor (cuando una sube, la otra baja).  
+
+- dpi y pop75 muestran una correlación positiva relativamente fuerte.  
+
+- ddpi parece tener correlaciones muy débiles con casi todas las variables.
+
+
+## FASE III  
+#### Regresión múltiple del modelo  
+
+Describir el modelo ajustado y sus residuos, contrastar la significatividad individual de los 
+parámetros y la calidad del modelo, verificar las hipótesis del modelo, análisis de datos 
+influyentes y atípicos  
+
+
+Primero se obtiene el objeto de regresión múltiple y se analiza.
+```{r}
+gc <- lm(sr ~ pop15 + pop75 + dpi + ddpi, data = sv)
+summary(gc)
+```
+La tasa de ahorro sr se ve explicada principalmente por dos variables:  
+
+  -pop15 (negativa y  bastante significativa)  
+  -ddpi (positiva y significativa)  
+
+Las variables pop75 y dpi no resultan significativas dentro del modelo (p-value superior a 0.05), probablemente a causa de multicolinealidad entre las variables demográficas y el nivel de renta.  
+
+El modelo es globalmente significativo ya que el F-statistic sugiere que al menos una de sus variables predictivas tiene más capacidad explicativa que un modelo sin predictores (p < 0.001), pero su capacidad explicativa es limitada (R^2 = 0.34). Se deberá depurar el modelo eliminando variables no significativas.
+
+#### Análisis de la tabla ANOVA
+
+```{r}
+anova(gc)
+```
+La tabla ANOVA proporciona información sobre la explicabilidad de los resultados de sr en función de cada variable predictora.  
+Según los resultados de la tabla ANOVA, pop15 y ddpi son las variables con más capacidad predictora, pop75 es ligeramente no significativo y dpi es completamente insignificativo.  
+
+#### Estudio de la multicolinealidad  
+
+Se recuerda que la multicolinealidad puede inflar las varianzas y los pesos de las variables, haciendo que un pequeño cambio en el dataset ocasione un gran cambio en las rectas de regresión. Para estudiarla se calcula la matriz de autovalores.
+```{r}
+X <- model.matrix(gc)[, 2:5]   # quitamos el intercepto
+R <- cor(X)
+
+# Autovalores de la matriz de correlaciones
+eig <- eigen(R)
+
+# Índice de condición para cada autovalor
+k <- sqrt(max(eig$values) / eig$values)
+k
+```
+Ninguno es supeior a 10 por lo que no parece haber clara colinealidad..  
+
+
+### Comprobación de normalidad, independencia, homocedasticidad, linealidad etc.    
+
+- *Normalidad de residuos*
+```{r}
+#Normalidad: QQ-plot de los residuos e histograma
+par(mfrow=c(1,2))
+qqnorm(gc$res)
+qqline(gc$res)
+hist(gc$res,13)
+```
+
+No es una normal perfecta pero sí que sigue bastante el patrón de una normal, por lo que no se descarta normalidad a priori. Puede ser que con más datos la forma fuera algo más perfecta.  
+
+Contraste de `Saphiro-Wilk` para *normalidad de residuos*. Se usa este porque solo se dispone de 50 filas de datos.
+```{r}
+shapiro.test(gc$res)
+```
+No podemos rechazar la hipótesis nula (los residuos tienen una distribución normal)
+
+- *Independencia con Durbin-Watson*
+```{r}
+library(lmtest)
+dwtest(gc,alternative ="two.sided",iterations = 1000)
+```
+El estadístico es muy cercano a 2, lo que indica ausencia de autocorrelación en residuos.
+
+No podemos rechazar la hipótesis de que los residuos no son independientes (p-value alto)
+
+- *Homocedasticidad*   
+
+Gráfica de residuos
+```{r}
+#Muestro los residuos del modelo gráficamente
+par(mfrow=c(1,1))
+plot(gc$fit,gc$res,xlab="Fitted",ylab="Residuals", main="Residual-Fitted plot")
+abline(h=0)
+```
+En la gráfica ya se aprecia una varianza constante de los residuos. Destaca algún residuo por su magnitud. De igual forma, se comprueba con contraste `Breusch-Pagan`
+
+
+```{r}
+bptest(gc)
+```
+El p-value es mucho mayor a 0.05 por lo que no se puede rechazar la hipótesis nula, es decir, que la varianza de los residuos sea constante.  
+
+### Análisis de puntos palanca e influyentes  
+
+Estudio de puntos palanca
+```{r}
+x <- model.matrix(gc)
+leverageC <- hat(x)
+
+# Definir la línea de referencia
+h <- 2 * sum(leverageC) / 50
+
+# Ajustar ylim para que haya espacio arriba
+ylim_max <- max(leverageC) * 1.1  # 10% más arriba para no cortar un punto 
+plot(leverageC, ylab = "Leverages", main = "Index plot of Leverages", ylim = c(0, ylim_max))
+
+abline(h = h, col = "red")
+
+outliers <- which(leverageC > h)
+text(x = outliers, y = leverageC[outliers], labels = rownames(savings)[outliers],
+     pos = 3, cex = 0.8, col = "blue")
+
+```
+
+Se aprecia que Irlanda, Japón, Libya y EEUU superan el umbral. Esto quiere decir que estos puntos son potencialmente influyentes en la recta de regresión. 
+
+```{r}
+#Muestro los efectos palanca de estos puntos
+names(leverageC) <- names
+leverageC[leverageC > 2*sum(leverageC)/50]
+```
+
+Se procede a estudiar la *distancia de Cook*.  
+
+La distancia de Cook es otra medida que indica cuánto influye cada observación individual en los resultados de un modelo de regresión.  
+
+- Combina residuos y apalancamiento.  
+
+- Un valor alto significa que esa observación tiene un impacto grande en los coeficientes del modelo.  
+
+-  Se usa para detectar outliers influyentes que podrían distorsionar la regresión.
+```{r}
+#Identificación de puntos influyentes (estadístico de Cook)
+cookC <- cooks.distance(gc)
+plot(cookC,ylab="Cooks distance")
+abline (h = 4 / (50-4-1), lty = 2, col = "steelblue") 
+
+# Umbral 
+threshold <- 4 / (50-4-1)
+
+# Índices de observaciones con Cook alto
+high_cook <- which(cookC > threshold)
+high_cook
+```
+En este caso, Japan, Zambia y Lybia parecen ser los puntos que superan el threshold, es decir, aquellos potencialmente influyentes.  
+
+InfluencePlot para analizar efecto palanca.
+```{r}
+#Otra forma de analizar el efecto palanca, los puntos influyentes y los valores atípicos es usando la función influencePlot
+library(car)
+influencePlot(gc, id.method="identify")
+```
+Se aprecia que Lybia, Japan y Zambia destacan respecto al resto. Este plot es útil para estudiar qué es lo que hace destacar a los puntos, si su efecto palanca (hat-values) o el tamaño del residuo estudentizado.
+
+Estudio de residuos estudentizados
+```{r}
+studC<- rstudent(gc)
+plot(studC,ylab="Studentized Residuals",main="Studentized Residuals")
+```
+
+Ordenamos los códigos postales por su residuo estudentizado.
+```{r}
+sort(abs(studC)) 
+
+# t_(n-k-1,1-alfa/2) con nivel de significación alfa=0.05
+qt(0.975,45)
+```
+Como se puede ver, los residuos estudentizados más altos no tienen por qué proceder de los puntos palanca. Según el valor crítico de la distribución t de student, a partir de 2.014 se consideran outliers. Chile y Zambia son dos posibles candidatos. 
+
+En caso de quedarnos con este modelo se decidiría eliminar aquellos puntos con distancia de Cook mayor al threshold (Japon, Zambia y Lybia).
+
+## FASE IV
+#### Identificar el mejor modelo de regresión lineal y analizarlo.  
+
+Se procede a implementar distintos métodos para detectar qué modelo es el mejor. Se trata de buscar un modelo lo más simple posible que tenga una capacidad predictora competente.
+
+Estadístico `Cp de Mallow`
+```{r}
+cook_filter <- cooks.distance(gc) < threshold  
+
+y <- savings$sr[cook_filter]
+x <- savings[cook_filter, !names(savings) %in% "sr"]
+
+# Selección de variables
+library(leaps)
+subset_models <- leaps(x, y)
+
+# Graficar Cp de Mallows
+Cpplot(subset_models)
+```
+
+Según el `Cp de Mallow`, los dos modelos más interesantes serían el 124 y el 14. Si bien es cierto que el 124 se acerca más a la linea por debajo, el 14 es más simple y a su vez está por debajo de la línea, lo que indica que se ajusta bien a los datos.
+
+```{r}
+modSS <- regsubsets(sr ~ ., data = sv, nbest = 2, intercept = TRUE)
+mallowCp <- subsets(modSS, statistic="cp", legend = FALSE, min.size = 1, main = "Mallow Cp")
+abline(a = 1, b = 1, lty = 2)
+```
+
+Esta es otra forma de representar la gráfica del `Cp de Mallow`. Se reitera lo dicho anteriormente, los modelos candidatos serían el de variables 14 y 124.
+
+
+`R cuadrado ajustado`:   
+Premia la capacidad explicativa y penaliza el exceso de predictores que solo aumentan el ruido.
+
+```{r}
+adjr <- leaps(x,y,method="adjr2")
+maxadjr(adjr,4)
+```
+Aquí se ve como el mejor R^2 ajustado lo tiene el modelo más simple de predictores 1 y 4  
+
+
+Selección con `AIC` usando *stepwise* 
+```{r}
+back <- lm(sr ~ ., sv)
+sm <- step(back, direction = "both")
+```
+El algoritmo ha eliminado la variable dpi porque disminuye el AIC y elige como mejor modelo el compuesto por las variables pop75, pop15 y ddpi. Destacar también que en caso de quitar la variable pop75 la penalización es relativamente baja (vease el AIC en la tabla de abajo y fila -pop75) y la ventaja es la simplificación del modelo.  
+
+Para la *decisión final* se tiene en cuenta lo siguiente:  
+ - Los modelos candidatos eran los de variables pop15 y ddpi y las mismas junto con pop75. Debido a que ambos modelos son prácticamente iguales en cuanto a capacidad de predicción y además obtienen puntuaciones parecidas en AIC y R^2 ajustado, se decide escoger el modelo más simple compuesto por dos variables predictoras: *pop15 y ddpi*
+
+```{r}
+mfin <- lm(sr ~ pop15 + ddpi, sv) # modelo final
+summary(mfin)
+```
+Parece que el modelo actual es prácticamente igual de bueno que el anterior pese a haber reducido el número de predictores. Dichos predictores tienen ahora p-value inferior a 0.05 por lo que se consideran influyentes en el resultado.  El F-statistic sigue siendo inferior a 0.001. 
+
+### Análisis de la tabla ANOVA
+```{r}
+anova(mfin)
+```
+Ambos p-values son menores que 0.05, lo cual es positivo. Además, la variable predictora más importante es pop15 aunque el ddpi sí se considera algo importante y por tanto, debe permanecer.
+
+### Supuestos del modelo:  
+
+
+- *Normalidad*
+```{r}
+#Normalidad: QQ-plot de los residuos e histograma
+par(mfrow=c(1,2))
+qqnorm(mfin$res)
+qqline(mfin$res)
+hist(mfin$res,10)
+```
+El gráfico QQplot ya nos indica una clara normalidad en los residuos, ya que los puntos siguen relativamente bien la linea salvo algún punto muy concreto. El histograma también tiene cierto parecido con el de una normal salvo por unos outliers muy marcados con valores superiores a 10. Se realiza el contraste the `Saphiro-Wilk`para cerciorarse de la normalidad de los residuos.
+```{r}
+shapiro.test(mfin$res)
+```
+No podemos rechazar que los datos provengan de una normal. (p-value muy alto) 
+
+- *Homocedasticidad*   
+Análisis de Residuos
+```{r}
+plot(mfin$fit, mfin$res,xlab="Fitted",ylab="Residuals", main="Residual-Fitted plot")
+abline(h=0)
+```
+
+
+Parece que sí hay homocedasticidad, ya que se aprecia una varianza constante en los datos. 
+Igualmente se comprueba con el contraste de `Breusch-Pagan`
+
+```{r}
+bptest(mfin)
+```
+El p-value es superior a 0.05 por lo que no podemos rechazar la homocedasticidad de los residuos
+
+- *Independencia*  
+Estadístico de `Durbin-Watson`
+```{r}
+#Independencia (estadístico de Durbin-Watson)
+dwtest(mfin,alternative ="two.sided",iterations = 1000)
+```
+No podemos rechazar la hipótesis de que los residuos no son independientes. Es por ello que no se considera correlación entre residuos. 
+
+El modelo cumple los supuestos y, por tanto, se puede llevar a cabo el estudio de puntos palanca e influyentes para mejorarlo.  
+
+
+### Análisis de puntos palanca e influyentes  
+
+*Puntos palanca*
+```{r}
+x <- model.matrix(mfin)
+leverageC <- hat(x)
+
+# Definir la línea de referencia
+h <- 2 * sum(leverageC) / 50
+
+# Ajustar ylim para que haya espacio arriba
+ylim_max <- max(leverageC) * 1.1  # 10% más arriba para no cortar un punto 
+plot(leverageC, ylab = "Leverages", main = "Index plot of Leverages", ylim = c(0, ylim_max))
+
+abline(h = h, col = "red")
+
+outliers <- which(leverageC > h)
+text(x = outliers, y = leverageC[outliers], labels = rownames(savings)[outliers],
+     pos = 3, cex = 0.8, col = "blue")
+```
+Se aprecian como puntos influyentes Lybia y Jamaica. Dejamos estos dos puntos como candidatos a ser eliminados. Cabe destacar que Lybia tiene un efecto palanca muy superior a Jamaica.
+
+```{r}
+#Muestro los efectos palanca de estos puntos
+names(leverageC) <- names
+leverageC[leverageC > 2*sum(leverageC)/50]
+```
+
+*Distancia de Cook*
+```{r}
+#Identificación de puntos influyentes (estadístico de Cook)
+cookC <- cooks.distance(mfin)
+plot(cookC,ylab="Cooks distances")
+abline (h = 4 / (50-2-1), lty = 2, col = "steelblue") 
+
+# Umbral 
+threshold <- 4 / (50-2-1)
+
+# Índices de observaciones con Cook alto
+high_cook <- which(cookC > threshold)
+high_cook
+```
+
+Japón, Zambia y Lybia son los 3 países con mayor distancia de Cook.
+
+Puntos de influencia con `InfluencePlot`
+```{r}
+influencePlot(mfin, id.method="identify")
+```
+
+Zambia, Japan y Lybia son los puntos a destacar en el gráfico. Efectivamente, Lybia es el que mayor hat-value tiene, y Zambia y Japan son puntos que destacan porque sus residuos estudentizados son outliers. Vease mejor en el análisis de residuos estudentizados.
+
+*Análisis de Residuos estudentizados*
+```{r}
+#Comprobemos que efectivamente son datos atípicos a partir del análisis de los residuos estudentizados 
+studC<- rstudent(mfin)
+sort(abs(studC))
+qt(0.975,47)
+```
+Los residuos estudentizados más altos los obtienen Iceland, Chile, Japan y Zambia. Como analizamos con anterioridad, Japan y Zambia son los outiers mas destacables. 
+
+
+### Conclusiones   
+
+Primeramente se vio como Lybia era el mayor leverage point aunque no era el residuo más grande. Luego, en el estudio de residuos estudentizados se aprecia como Zambia y Japón son los más grandes aunque no eran justamente los que más leverage tenían. La *distancia de Cook* tiene ambos factores en cuenta y es por ello que será la metrica en la que nos basemos para descartar puntos.
+
+Los puntos a eliminar son Japan, Zambia y Lybia.
+
+## FASE V
+#### Análisis del mejor modelo tras eliminar valores influyentes y atípicos.  
+
+
+Eliminación de puntos con mayor distancia de Cook
+```{r}
+# Filtro
+sv_new <- sv[-high_cook, ]
+# Se comprueba que se han eliminado dichos puntos
+nrow(sv)
+nrow(sv_new)
+```
+### Estudio del mejor modelo sin dichos puntos
+```{r}
+mfin_clean <- lm(sr ~ pop15 + ddpi, sv_new) # modelo final
+summary(mfin_clean)
+```
+Se aprecia como ha aumentado en cierta medida el R^2 y el R^2 ajustado. Además, eliminando los puntos con mayor distancia de Cook, la variable ddpi ha perdido algo de relevancia ya que ahora su p-value es ligeramente superior a 0.05. 
+
+Ahora podemos presenciar un modelo simple (solo dos variables predictoras) pero muy competente con el inicial a la hora de predecir, ya que su R^2 ajustado ha mejorado. Es por ello que se considera este modelo como el mejor.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
